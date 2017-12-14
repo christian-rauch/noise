@@ -11,8 +11,23 @@
 #define F2 0.3660254037844386f  // 0.5 * (sqrt(3.0) - 1.0)
 #define G2 0.21132486540518713f // (3.0 - sqrt(3.0)) / 6.0
 
+// randomly shuffle array
+// https://stackoverflow.com/a/10072899/8144672
+void
+shuffle(unsigned char *array, size_t n) {
+    if (n > 1) {
+        size_t i;
+        for (i = n - 1; i > 0; i--) {
+            size_t j = (unsigned int) (drand48()*(i+1));
+            unsigned char t = array[j];
+            array[j] = array[i];
+            array[i] = t;
+        }
+    }
+}
+
 float 
-noise2(float x, float y) 
+noise2(float x, float y, unsigned char *PERM1) 
 {
 	int i1, j1, I, J, c;
 	float s = (x + y) * F2;
@@ -37,9 +52,9 @@ noise2(float x, float y)
 
 	I = (int) i & 255;
 	J = (int) j & 255;
-	g[0] = PERM[I + PERM[J]] % 12;
-	g[1] = PERM[I + i1 + PERM[J + j1]] % 12;
-	g[2] = PERM[I + 1 + PERM[J + 1]] % 12;
+	g[0] = PERM1[I + PERM1[J]] % 12;
+	g[1] = PERM1[I + i1 + PERM1[J + j1]] % 12;
+	g[2] = PERM1[I + 1 + PERM1[J + 1]] % 12;
 
 	for (c = 0; c <= 2; c++)
 		f[c] = 0.5f - xx[c]*xx[c] - yy[c]*yy[c];
@@ -263,31 +278,38 @@ py_noise2(PyObject *self, PyObject *args, PyObject *kwargs)
     float repeatx = FLT_MAX;
     float repeaty = FLT_MAX;
     float z = 0.0f;
+    long int seed = 0;
 	static char *kwlist[] = {"x", "y", "octaves", "persistence", "lacunarity", 
-        "repeatx", "repeaty", "base", NULL};
+        "repeatx", "repeaty", "base", "seed", NULL};
 
-	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ff|ifffff:snoise2", kwlist,
-		&x, &y, &octaves, &persistence, &lacunarity, &repeatx, &repeaty, &z)) {
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ff|ifffffl:snoise2", kwlist,
+		&x, &y, &octaves, &persistence, &lacunarity, &repeatx, &repeaty, &z, &seed)) {
 		return NULL;
     }
     if (octaves <= 0) {
         PyErr_SetString(PyExc_ValueError, "Expected octaves value > 0");
         return NULL;
     }
+
+    srand48(seed);
+
+    unsigned char PERM_R[512];
+    memcpy(PERM_R, PERM, sizeof(unsigned char)*512);
+    shuffle(PERM_R, 512);
 	
     if (repeatx == FLT_MAX && repeaty == FLT_MAX) {
         // Flat noise, no tiling
         float freq = 1.0f;
         float amp = 1.0f;
         float max = 1.0f;
-        float total = noise2(x + z, y + z);
+        float total = noise2(x + z, y + z, PERM_R);
         int i;
 
         for (i = 1; i < octaves; i++) {
             freq *= lacunarity;
             amp *= persistence;
             max += amp;
-            total += noise2(x * freq + z, y * freq + z) * amp;
+            total += noise2(x * freq + z, y * freq + z, PERM_R) * amp;
         }
         return (PyObject *) PyFloat_FromDouble((double) (total / max));
     } else { // Tiled noise
